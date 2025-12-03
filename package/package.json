@@ -1,0 +1,68 @@
+{
+  "name": "@task-orchestrator/programmatic-tools",
+  "version": "0.1.0",
+  "description": "Programmatic tool execution for Vercel AI SDK with MCP integration and efficiency optimizations",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./mcp": {
+      "import": "./dist/mcp/index.js",
+      "types": "./dist/mcp/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "vercel",
+    "ai",
+    "ai sdk",
+    "tools",
+    "model context protocol",
+    "mcp",
+    "programmatic",
+    "programmatic tool calling",
+    "efficient tool calling",
+    "execute tools with code",
+    "tool-calling",
+    "tool-execution",
+    "tool-orchestration",
+    "tool-orchestration-sandbox",
+    "code-execution",
+    "save tokens",
+    "llm optimization",
+    "vercel sandbox"
+  ],
+  "author": "Cameron King",
+  "author_url": "https://github.com/cameronking4",
+  "license": "MIT",
+  "peerDependencies": {
+    "ai": "^5.0.0",
+    "@vercel/sandbox": "^1.0.0",
+    "zod": "^3.0.0",
+    "ms": "^2.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/mcp": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "@ai-sdk/mcp": "^0.0.11"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
+}
+

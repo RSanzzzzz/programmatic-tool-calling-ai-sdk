@@ -181,6 +181,26 @@ getCommandOutput(resp)   // Parse command results
 
 ### Installation
 
+#### Option 1: Use the Published Package (Recommended)
+
+Install the published npm package:
+
+```bash
+npm install @task-orchestrator/programmatic-tools
+```
+
+**Peer Dependencies** (required):
+```bash
+npm install ai@^5.0.0 @vercel/sandbox@^1.0.0 zod@^3.0.0 ms@^2.1.0
+```
+
+**Optional Dependencies** (for MCP support):
+```bash
+npm install @ai-sdk/mcp@^0.0.11
+```
+
+#### Option 2: Clone and Develop
+
 ```bash
 # Clone the repository
 git clone https://github.com/your-repo/vercel-ptc-next.git
@@ -219,12 +239,107 @@ npm run dev
 
 ## 📖 Usage
 
-### Basic Chat
+### Using the Package in Your Project
+
+#### Basic Setup
+
+```typescript
+import { streamText } from 'ai';
+import { withProgrammaticCalling } from '@task-orchestrator/programmatic-tools';
+import { tool } from 'ai';
+import { z } from 'zod';
+
+// Define your tools
+const myTools = {
+  getUser: tool({
+    description: 'Get user by ID',
+    inputSchema: z.object({ id: z.string() }),
+    execute: async ({ id }) => ({ id, name: `User ${id}`, score: Math.random() * 100 }),
+  }),
+  calculateAverage: tool({
+    description: 'Calculate average of numbers',
+    inputSchema: z.object({ numbers: z.array(z.number()) }),
+    execute: async ({ numbers }) => ({
+      average: numbers.reduce((a, b) => a + b, 0) / numbers.length
+    }),
+  }),
+};
+
+// Wrap tools for programmatic calling
+const { tools } = withProgrammaticCalling(myTools);
+
+// Use with streamText or generateText
+const result = await streamText({
+  model: yourModel,
+  tools,
+  messages: [{ 
+    role: 'user', 
+    content: 'Get users 1, 2, 3 and calculate their average score' 
+  }],
+});
+```
+
+#### With MCP Integration
+
+```typescript
+import { withProgrammaticCalling } from '@task-orchestrator/programmatic-tools';
+import { createMCPManager } from '@task-orchestrator/programmatic-tools/mcp';
+
+// Initialize MCP servers
+const mcpManager = createMCPManager({
+  servers: [
+    {
+      name: 'firecrawl',
+      type: 'http',
+      url: 'https://mcp.firecrawl.dev/your-key/v2/mcp',
+    },
+  ],
+});
+
+await mcpManager.initialize();
+const mcpTools = mcpManager.getTools();
+
+// Combine with your local tools
+const allTools = { ...myTools, ...mcpTools };
+
+// Wrap for programmatic calling
+const { tools } = withProgrammaticCalling(allTools);
+```
+
+#### With Context Management (Token Optimization)
+
+```typescript
+import { ContextManager, withContextManagement } from '@task-orchestrator/programmatic-tools';
+
+const contextManager = new ContextManager();
+
+const result = await streamText({
+  model,
+  tools,
+  messages,
+  ...withContextManagement({
+    contextManager,
+    onStepFinish: (step) => {
+      // Your custom step handling
+    },
+  }),
+});
+
+// Get token savings
+const tokensSaved = contextManager.getTokensSaved();
+console.log(`Saved ${tokensSaved.totalSaved} tokens`);
+```
+
+### Using the Demo Application
+
+If you've cloned the repository, you can run the full demo:
+
+#### Basic Chat
 1. Select your model from the dropdown (⌘K to open)
 2. Type a prompt that requires multiple operations
 3. Watch as PTC generates code and executes efficiently
 
-### Example Prompts
+#### Example Prompts
 
 ```
 "Get 5 users and calculate their average score"
@@ -237,7 +352,7 @@ npm run dev
 → MCP scraping with filtering and formatting
 ```
 
-### Debug Panel
+#### Debug Panel
 Click "Debug" to view:
 - Generated code
 - Individual tool call results
@@ -413,6 +528,30 @@ PTC tracks four categories of savings:
 
 ### Adding Local Tools
 
+When using the package:
+
+```typescript
+import { tool } from 'ai';
+import { z } from 'zod';
+
+const myTools = {
+  myCustomTool: tool({
+    description: 'Description for LLM',
+    inputSchema: z.object({
+      param: z.string().describe('Parameter description'),
+    }),
+    execute: async ({ param }) => {
+      // Your implementation
+      return { result: '...' };
+    },
+  }),
+};
+
+const { tools } = withProgrammaticCalling(myTools);
+```
+
+When developing locally (in this repo):
+
 ```typescript
 // lib/tools.ts
 export const tools = {
@@ -430,6 +569,24 @@ export const tools = {
 ```
 
 ### Adding MCP Servers
+
+When using the package:
+
+```typescript
+import { createMCPManager } from '@task-orchestrator/programmatic-tools/mcp';
+
+const mcpManager = createMCPManager({
+  servers: [
+    {
+      name: "Your MCP Server",
+      type: "http",
+      url: "https://your-mcp-server.com/mcp"
+    },
+  ],
+});
+```
+
+When developing locally (in this repo):
 
 ```typescript
 // lib/mcp/mcp-config.ts
@@ -459,8 +616,30 @@ npm run lint
 
 ---
 
+## 📦 Package Information
+
+The core functionality is available as an npm package:
+
+**Package:** [`@task-orchestrator/programmatic-tools`](https://www.npmjs.com/package/@task-orchestrator/programmatic-tools)
+
+**Installation:**
+```bash
+npm install @task-orchestrator/programmatic-tools
+```
+
+**Documentation:** See the [package README](./package/README.md) for detailed API documentation.
+
+**Features:**
+- ✅ Programmatic tool calling with code generation
+- ✅ MCP (Model Context Protocol) integration
+- ✅ Context management for token optimization
+- ✅ Efficiency metrics tracking
+- ✅ Defensive helper functions for robust execution
+
 ## 📚 Resources
 
+- [Package Documentation](./package/README.md) - Detailed API reference
+- [npm Package](https://www.npmjs.com/package/@task-orchestrator/programmatic-tools) - Install and use in your projects
 - [Vercel AI SDK Documentation](https://sdk.vercel.ai/docs)
 - [Model Context Protocol Specification](https://modelcontextprotocol.io/specification/2025-11-25)
 - [Vercel Sandbox Documentation](https://vercel.com/docs/vercel-sandbox)
