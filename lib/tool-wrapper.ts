@@ -18,9 +18,13 @@ export class ProgrammaticToolCaller {
     this.toolRegistry = new Map();
     
     // Extract execute functions for sandbox
+    // Note: MCP tools are included but may not work in sandbox due to external dependencies
     for (const [name, toolDef] of Object.entries(tools)) {
       if (toolDef.execute) {
-        this.toolRegistry.set(name, toolDef.execute);
+        // Only add non-MCP tools to sandbox (MCP tools need external client connections)
+        if (!name.startsWith('mcp_')) {
+          this.toolRegistry.set(name, toolDef.execute);
+        }
       }
     }
     
@@ -118,13 +122,22 @@ IMPORTANT: Always use this tool when the user asks for multiple items (like "get
     for (const [name, toolDef] of Object.entries(this.tools)) {
       docs.push(`${name}: ${toolDef.description || 'No description'}`);
       
-      if (toolDef.inputSchema && toolDef.inputSchema._def) {
-        const shape = toolDef.inputSchema._def.shape();
-        const params = Object.entries(shape).map(([key, val]: [string, any]) => {
-          const desc = val._def?.description || '';
-          return `  - ${key}: ${desc}`;
-        });
-        docs.push(params.join('\n'));
+      if (toolDef.inputSchema) {
+        try {
+          // Safely access _def - it might not exist for all Zod types
+          if (toolDef.inputSchema._def && typeof toolDef.inputSchema._def.shape === 'function') {
+            const shape = toolDef.inputSchema._def.shape();
+            const params = Object.entries(shape).map(([key, val]: [string, any]) => {
+              // Safely access description - val might not have _def
+              const desc = (val && val._def && val._def.description) || '';
+              return `  - ${key}: ${desc}`;
+            });
+            docs.push(params.join('\n'));
+          }
+        } catch (error) {
+          // If we can't extract schema info, just skip it
+          console.warn(`[ToolWrapper] Failed to extract schema for ${name}:`, error);
+        }
       }
     }
     

@@ -3,13 +3,33 @@ import { getModel, ModelConfig } from '@/lib/providers';
 import { withProgrammaticCalling } from '@/lib/tool-wrapper';
 import { ContextManager, withContextManagement } from '@/lib/context-manager';
 import { tools } from '@/lib/tools';
+import { MCPServerManager, createMCPManager } from '@/lib/mcp';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
+// Global MCP manager instance (initialized once)
+let mcpManager: MCPServerManager | null = null;
+
+// Initialize MCP manager on first use
+async function getMCPManager(): Promise<MCPServerManager | null> {
+  if (!mcpManager) {
+    mcpManager = createMCPManager();
+    if (mcpManager) {
+      try {
+        await mcpManager.initialize();
+      } catch (error) {
+        console.error('[MCP] Failed to initialize MCP manager:', error);
+        mcpManager = null;
+      }
+    }
+  }
+  return mcpManager;
+}
+
 export async function POST(req: Request) {
   try {
-    const { messages, modelConfig, maxSteps = 10 } = await req.json();
+    const { messages, modelConfig, maxSteps = 10, mcpServers } = await req.json();
 
     if (!messages || !Array.isArray(messages)) {
       return new Response('Messages array is required', { status: 400 });
@@ -19,8 +39,31 @@ export async function POST(req: Request) {
       return new Response('Model configuration is required', { status: 400 });
     }
 
+    // Merge base tools with MCP tools
+    let allTools = { ...tools };
+    
+    // Load MCP tools if servers are provided or configured
+    if (mcpServers && Array.isArray(mcpServers) && mcpServers.length > 0) {
+      // Create temporary MCP manager for this request
+      const tempMCPManager = new MCPServerManager({ servers: mcpServers });
+      try {
+        await tempMCPManager.initialize();
+        const mcpTools = tempMCPManager.getTools();
+        allTools = { ...allTools, ...mcpTools };
+      } catch (error) {
+        console.error('[MCP] Failed to load MCP tools:', error);
+      }
+    } else {
+      // Use global MCP manager if available
+      const globalMCPManager = await getMCPManager();
+      if (globalMCPManager) {
+        const mcpTools = globalMCPManager.getTools();
+        allTools = { ...allTools, ...mcpTools };
+      }
+    }
+
     // Wrap tools with programmatic calling
-    const { tools: enhancedTools } = withProgrammaticCalling(tools);
+    const { tools: enhancedTools } = withProgrammaticCalling(allTools);
     const contextManager = new ContextManager();
     const toolCalls: any[] = [];
     const codeExecutions: any[] = [];
@@ -28,10 +71,21 @@ export async function POST(req: Request) {
     // Get the model instance
     const model = getModel(modelConfig as ModelConfig);
 
+    // Build tool list for system prompt
+    const toolNames = Object.keys(enhancedTools).filter(name => name !== 'code_execution');
+    const baseTools = toolNames.filter(name => !name.startsWith('mcp_'));
+    const mcpTools = toolNames.filter(name => name.startsWith('mcp_'));
+    
+    let toolDescription = `You have access to tools including ${baseTools.join(', ')}, and code_execution.`;
+    if (mcpTools.length > 0) {
+      toolDescription += `\n\nAdditionally, you have access to ${mcpTools.length} MCP (Model Context Protocol) tools: ${mcpTools.slice(0, 5).join(', ')}${mcpTools.length > 5 ? ` and ${mcpTools.length - 5} more` : ''}.`;
+      toolDescription += `\nMCP tools are prefixed with 'mcp_' and provide access to external services and data sources.`;
+    }
+
     // Prepare messages with system prompt
     const systemMessage = {
       role: 'system' as const,
-      content: `You have access to tools including getUser, calculateAverage, filterByScore, and code_execution.
+      content: `${toolDescription}
 
 When you need to process multiple items (like getting multiple users), ALWAYS use the code_execution tool to write JavaScript code that:
 1. Calls tools in parallel using Promise.all() when possible
@@ -56,7 +110,9 @@ const sorted = users.sort((a, b) => b.score - a.score);
 return sorted.slice(0, 3);
 \`\`\`
 
-Always use code_execution for tasks requiring 3+ tool calls.`,
+Always use code_execution for tasks requiring 3+ tool calls.
+
+Note: MCP tools (prefixed with 'mcp_') cannot be used within code_execution - call them directly as they require external connections.`,
     };
 
     // Stream the response
