@@ -83,6 +83,22 @@ export async function getMCPClientTools(
     
     console.log(`[MCP] Loaded ${Object.keys(tools).length} tools from ${serverName}`);
     
+    // Debug: Log structure of first tool to understand MCP tool format
+    const toolEntries = Object.entries(tools);
+    if (toolEntries.length > 0) {
+      const [firstName, firstTool] = toolEntries[0];
+      const toolAny = firstTool as any;
+      console.log(`[MCP] Tool "${firstName}" keys:`, Object.keys(toolAny));
+      if (toolAny.parameters) {
+        console.log(`[MCP] Tool "${firstName}" has parameters:`, JSON.stringify(toolAny.parameters, null, 2).slice(0, 1000));
+      }
+      // Check for firecrawl_search specifically
+      const searchTool = tools['firecrawl_search'] as any;
+      if (searchTool?.parameters) {
+        console.log(`[MCP] firecrawl_search parameters:`, JSON.stringify(searchTool.parameters, null, 2));
+      }
+    }
+    
     // Prefix tool names with mcp_ to avoid conflicts with built-in tools
     const prefixedTools: Record<string, Tool> = {};
     for (const [name, tool] of Object.entries(tools)) {

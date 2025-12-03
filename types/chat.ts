@@ -13,24 +13,45 @@ export interface ToolCall {
   error?: string;
   timestamp: Date;
   executionTimeMs?: number;
+  isMCP?: boolean;
+}
+
+export interface TokenSavingsBreakdown {
+  intermediateResults: number;
+  roundTripContext: number;
+  toolCallOverhead: number;
+  llmDecisions: number;
+}
+
+export interface SandboxToolCall {
+  toolName: string;
+  args: any;
+  result?: any;
+  error?: string;
+  isMCP?: boolean;
+  executionTimeMs?: number;
+}
+
+export interface CodeExecutionMetadata {
+  toolCallCount: number;
+  localToolCallCount?: number;
+  mcpToolCallCount?: number;
+  intermediateTokensSaved: number;
+  totalTokensSaved?: number;
+  tokenSavingsBreakdown?: TokenSavingsBreakdown;
+  savingsExplanation?: string;
+  toolsUsed: string[];
+  mcpToolsUsed?: string[];
+  localToolsUsed?: string[];
+  executionTimeMs: number;
+  sandboxToolCalls?: SandboxToolCall[];
 }
 
 export interface CodeExecution {
   code: string;
   toolCalls: ToolCall[];
   result: any;
-  metadata?: {
-    toolCallCount: number;
-    intermediateTokensSaved: number;
-    toolsUsed: string[];
-    executionTimeMs: number;
-    sandboxToolCalls?: Array<{
-      toolName: string;
-      args: any;
-      result?: any;
-      error?: string;
-    }>;
-  };
+  metadata?: CodeExecutionMetadata;
 }
 
 export interface EfficiencyMetrics {
@@ -41,6 +62,9 @@ export interface EfficiencyMetrics {
   toolCallCount: number;
   executionTimeMs: number;
   intermediateTokensSaved: number;
+  totalTokensSaved?: number;
+  tokenSavingsBreakdown?: TokenSavingsBreakdown;
+  savingsExplanation?: string;
 }
 
 export interface ChatState {
@@ -51,4 +75,3 @@ export interface ChatState {
   isLoading: boolean;
   error: string | null;
 }
-

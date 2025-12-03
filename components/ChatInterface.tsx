@@ -1,73 +1,206 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { ChatMessage, ToolCall, CodeExecution, EfficiencyMetrics } from '@/types/chat';
-import MessageBubble from './MessageBubble';
-import ModelSelector from './ModelSelector';
+import { ModelConfig, GatewayModel } from '@/lib/providers';
+
+// AI Elements imports
+import {
+  Conversation,
+  ConversationContent,
+  ConversationScrollButton,
+  ConversationEmptyState,
+} from '@/components/ai-elements/conversation';
+import {
+  Message,
+  MessageContent,
+  MessageActions,
+  MessageAction,
+  MessageResponse,
+} from '@/components/ai-elements/message';
+import {
+  PromptInput,
+  PromptInputTextarea,
+  PromptInputFooter,
+  PromptInputTools,
+  PromptInputSubmit,
+} from '@/components/ai-elements/prompt-input';
+import { Loader } from '@/components/ai-elements/loader';
+import { Suggestions, Suggestion } from '@/components/ai-elements/suggestion';
+import { Tool, ToolHeader, ToolContent, ToolInput, ToolOutput } from '@/components/ai-elements/tool';
+import { CodeBlock, CodeBlockCopyButton } from '@/components/ai-elements/code-block';
+import {
+  ChainOfThought,
+  ChainOfThoughtHeader,
+  ChainOfThoughtContent,
+  ChainOfThoughtStep,
+  ChainOfThoughtSearchResults,
+  ChainOfThoughtSearchResult,
+} from '@/components/ai-elements/chain-of-thought';
+import {
+  ModelSelector,
+  ModelSelectorTrigger,
+  ModelSelectorContent,
+  ModelSelectorInput,
+  ModelSelectorList,
+  ModelSelectorEmpty,
+  ModelSelectorGroup,
+  ModelSelectorItem,
+  ModelSelectorLogo,
+  ModelSelectorName,
+} from '@/components/ai-elements/model-selector';
+
+// UI components
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Kbd } from '@/components/ui/kbd';
+
+// Icons
+import {
+  CopyIcon,
+  CheckIcon,
+  SquareIcon,
+  SparklesIcon,
+  WrenchIcon,
+  ZapIcon,
+  PanelRightIcon,
+  BoxIcon,
+  ClockIcon,
+  CodeIcon,
+  CheckCircle2Icon,
+  ChevronDownIcon,
+} from 'lucide-react';
+
+// Debug Panel
 import DebugPanel from './DebugPanel';
 import EfficiencyMetricsDisplay from './EfficiencyMetrics';
-import { ModelConfig } from '@/lib/providers';
+
+// Suggested prompts for empty state
+const SUGGESTED_PROMPTS = [
+  "Get 5 users and calculate their average score (user1, user2 ... user10)",
+  "Fetch user data and find those with score above 50 + return a list of the top 3 by score",
+  "Provide a list of today's top voted products on producthunt.com", "Fetch top posts from hackernews.com and return a list with posts with more than 100 points",
+  "Get the weather NYC, SF & London using execute code",
+  "List and demo tools (don't use httpbin.org)"
+];
+
+// Extended message type to include tool calls and code executions
+interface ExtendedMessage extends ChatMessage {
+  toolCalls?: ToolCall[];
+  codeExecution?: CodeExecution;
+}
+
+const STORAGE_KEY = 'ptc-model-config';
+const DEFAULT_MODEL_CONFIG: ModelConfig = {
+  provider: 'gateway',
+  model: 'anthropic/claude-sonnet-4',
+};
 
 export default function ChatInterface() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ExtendedMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([]);
   const [codeExecutions, setCodeExecutions] = useState<CodeExecution[]>([]);
   const [metrics, setMetrics] = useState<EfficiencyMetrics | null>(null);
-  const [modelConfig, setModelConfig] = useState<ModelConfig>({
-    provider: 'anthropic',
-    model: 'claude-sonnet-4-5',
-  });
+  const [modelConfig, setModelConfig] = useState<ModelConfig>(DEFAULT_MODEL_CONFIG);
   const [showDebug, setShowDebug] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [gatewayModels, setGatewayModels] = useState<GatewayModel[]>([]);
+  const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[]>([]);
+  const [pendingCodeExecution, setPendingCodeExecution] = useState<CodeExecution | null>(null);
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  // Load model config from localStorage on mount
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as ModelConfig;
+        if (parsed.provider && parsed.model) {
+          setModelConfig(parsed);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load model config from localStorage:', error);
+    }
+  }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  // Save model config to localStorage when it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(modelConfig));
+    } catch (error) {
+      console.error('Failed to save model config to localStorage:', error);
+    }
+  }, [modelConfig]);
 
-    const userMessage: ChatMessage = {
+  // Fetch gateway models on mount
+  useEffect(() => {
+    if (gatewayModels.length === 0) {
+      fetch('/api/models')
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.models) {
+            setGatewayModels(data.models);
+          }
+        })
+        .catch((error) => console.error('Failed to fetch gateway models:', error));
+    }
+  }, [gatewayModels.length]);
+
+  // Keyboard shortcut for model selector (Cmd+K / Ctrl+K)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setModelSelectorOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handleCopy = useCallback(async (content: string, messageId: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedMessageId(messageId);
+      setTimeout(() => setCopiedMessageId(null), 2000);
+    } catch (error) {
+      console.error('Failed to copy:', error);
+    }
+  }, []);
+
+  const handleSubmit = async ({ text }: { text: string }) => {
+    if (!text.trim() || isLoading) return;
+
+    const userMessage: ExtendedMessage = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: text,
       timestamp: new Date(),
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
+    setPendingToolCalls([]);
+    setPendingCodeExecution(null);
 
-    // Create abort controller for this request
     abortControllerRef.current = new AbortController();
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [
-            ...messages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-            {
-              role: 'user',
-              content: input,
-            },
+            ...messages.map((m) => ({ role: m.role, content: m.content })),
+            { role: 'user', content: text },
           ],
           modelConfig,
-          maxSteps: 10,
+          maxSteps: 100,
         }),
         signal: abortControllerRef.current.signal,
       });
@@ -80,8 +213,10 @@ export default function ChatInterface() {
       const decoder = new TextDecoder();
       let assistantContent = '';
       const assistantMessageId = (Date.now() + 1).toString();
+      let receivedToolCalls: ToolCall[] = [];
+      let receivedCodeExecution: CodeExecution | null = null;
 
-      const assistantMessage: ChatMessage = {
+      const assistantMessage: ExtendedMessage = {
         id: assistantMessageId,
         role: 'assistant',
         content: '',
@@ -96,39 +231,48 @@ export default function ChatInterface() {
           if (done) break;
 
           const chunk = decoder.decode(value, { stream: true });
-          
-          // Check for metadata
+
           if (chunk.includes('__METADATA__:')) {
             const parts = chunk.split('__METADATA__:');
             assistantContent += parts[0];
-            
+
             try {
               const metadata = JSON.parse(parts[1].trim());
               if (metadata.type === 'metadata') {
                 const data = metadata.data;
+                const execMetadata = data.codeExecutions?.[0]?.metadata;
                 setMetrics({
                   totalTokens: data.totalTokens || 0,
                   promptTokens: data.promptTokens || 0,
                   completionTokens: data.completionTokens || 0,
                   tokensSaved: data.tokensSaved || 0,
                   toolCallCount: data.toolCallCount || 0,
-                  executionTimeMs: data.codeExecutions?.[0]?.metadata?.executionTimeMs || 0,
-                  intermediateTokensSaved: data.codeExecutions?.[0]?.metadata?.intermediateTokensSaved || 0,
+                  executionTimeMs: execMetadata?.executionTimeMs || 0,
+                  intermediateTokensSaved: execMetadata?.intermediateTokensSaved || 0,
+                  totalTokensSaved: execMetadata?.totalTokensSaved || 0,
+                  tokenSavingsBreakdown: execMetadata?.tokenSavingsBreakdown,
+                  savingsExplanation: execMetadata?.savingsExplanation,
                 });
-                
-                // Update tool calls and code executions
+
                 if (data.toolCalls) {
-                  setToolCalls(data.toolCalls.map((tc: any) => ({
+                  receivedToolCalls = data.toolCalls.map((tc: ToolCall) => ({
                     ...tc,
                     timestamp: new Date(tc.timestamp),
-                  })));
+                  }));
+                  setToolCalls(receivedToolCalls);
+                  setPendingToolCalls(receivedToolCalls);
                 }
-                
-                if (data.codeExecutions) {
-                  setCodeExecutions(data.codeExecutions.map((ce: any) => ({
+
+                if (data.codeExecutions && data.codeExecutions.length > 0) {
+                  receivedCodeExecution = {
+                    ...data.codeExecutions[0],
+                    timestamp: new Date(),
+                  };
+                  setCodeExecutions(data.codeExecutions.map((ce: CodeExecution) => ({
                     ...ce,
-                    timestamp: new Date(ce.timestamp),
+                    timestamp: new Date(),
                   })));
+                  setPendingCodeExecution(receivedCodeExecution);
                 }
               }
             } catch (e) {
@@ -138,32 +282,41 @@ export default function ChatInterface() {
             assistantContent += chunk;
           }
 
+          // Update the assistant message with tool calls and code execution
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMessageId
-                ? { ...m, content: assistantContent }
+                ? {
+                    ...m,
+                    content: assistantContent,
+                    toolCalls: receivedToolCalls,
+                    codeExecution: receivedCodeExecution || undefined,
+                  }
                 : m
             )
           );
         }
       }
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
+    } catch (error: unknown) {
+      const err = error as Error;
+      if (err.name === 'AbortError') {
         console.log('Request aborted');
       } else {
-        console.error('Error:', error);
+        console.error('Error:', err);
         setMessages((prev) => [
           ...prev,
           {
             id: Date.now().toString(),
             role: 'assistant',
-            content: `Error: ${error.message}`,
+            content: `Error: ${err.message}`,
             timestamp: new Date(),
           },
         ]);
       }
     } finally {
       setIsLoading(false);
+      setPendingToolCalls([]);
+      setPendingCodeExecution(null);
       abortControllerRef.current = null;
     }
   };
@@ -175,88 +328,456 @@ export default function ChatInterface() {
     }
   };
 
-  return (
-    <div className="flex h-screen flex-col bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
-      <header className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-950">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-            Programmatic Tool Calling
-          </h1>
-          <div className="flex items-center gap-4">
-            <ModelSelector
-              value={modelConfig}
-              onChange={setModelConfig}
+  const handleSuggestionClick = (suggestion: string) => {
+    setInput(suggestion);
+  };
+
+  const getStatus = () => {
+    if (isLoading) return 'streaming';
+    return 'ready';
+  };
+
+  // Render tool calls for a message
+  const renderToolCalls = (calls: ToolCall[] | undefined) => {
+    if (!calls || calls.length === 0) return null;
+
+    // Helper to determine tool state
+    const getToolState = (call: ToolCall): 'output-available' | 'output-error' | 'input-available' => {
+      if (call.error) return 'output-error';
+      // Check if result exists and is not undefined/null
+      if (call.result !== undefined && call.result !== null) return 'output-available';
+      return 'input-available';
+    };
+
+    return (
+      <div className="mt-4 space-y-2 overflow-hidden max-w-full">
+        {calls.map((call) => (
+          <Tool key={call.id} defaultOpen={false} className="overflow-hidden">
+            <ToolHeader
+              title={call.toolName}
+              type="tool-invocation"
+              state={getToolState(call)}
             />
-            <button
-              onClick={() => setShowDebug(!showDebug)}
-              className="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+            <ToolContent>
+              <ToolInput input={call.args} />
+              {(call.result !== undefined || call.error) && (
+                <ToolOutput output={call.result} errorText={call.error} />
+              )}
+            </ToolContent>
+          </Tool>
+        ))}
+      </div>
+    );
+  };
+
+  // Render code execution for a message
+  const renderCodeExecution = (exec: CodeExecution | undefined) => {
+    if (!exec) return null;
+
+    return (
+      <div className="mt-4 overflow-hidden max-w-full">
+        <ChainOfThought defaultOpen={false} className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+          <ChainOfThoughtHeader className="text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300">
+            <span className="flex items-center gap-2 flex-1">
+              <span>Sandbox Execution</span>
+              {exec.metadata && (
+                <ChainOfThoughtSearchResults className="ml-auto">
+                  {exec.metadata.toolCallCount > 0 && (
+                    <ChainOfThoughtSearchResult className="border-amber-500/30 bg-amber-500/10">
+                      <WrenchIcon className="h-3 w-3" />
+                      {exec.metadata.toolCallCount} tools
+                    </ChainOfThoughtSearchResult>
+                  )}
+                  {exec.metadata.executionTimeMs > 0 && (
+                    <ChainOfThoughtSearchResult className="border-amber-500/30 bg-amber-500/10">
+                      <ClockIcon className="h-3 w-3" />
+                      {exec.metadata.executionTimeMs}ms
+                    </ChainOfThoughtSearchResult>
+                  )}
+                  {exec.metadata.totalTokensSaved && exec.metadata.totalTokensSaved > 0 && (
+                    <ChainOfThoughtSearchResult className="bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/30">
+                      <SparklesIcon className="h-3 w-3" />
+                      {exec.metadata.totalTokensSaved.toLocaleString()} saved
+                    </ChainOfThoughtSearchResult>
+                  )}
+                </ChainOfThoughtSearchResults>
+              )}
+            </span>
+          </ChainOfThoughtHeader>
+
+          <ChainOfThoughtContent className="mt-3 space-y-1">
+            {/* Code Step */}
+            <ChainOfThoughtStep
+              icon={CodeIcon}
+              label="Executed Code"
+              status="complete"
             >
-              {showDebug ? 'Hide' : 'Show'} Debug
-            </button>
+              <div className="overflow-x-hidden">
+                <CodeBlock code={exec.code} language="javascript" wrapText>
+                  <CodeBlockCopyButton />
+                </CodeBlock>
+              </div>
+            </ChainOfThoughtStep>
+
+            {/* Internal Tool Calls Step */}
+            {exec.metadata?.sandboxToolCalls && exec.metadata.sandboxToolCalls.length > 0 && (
+              <ChainOfThoughtStep
+                icon={WrenchIcon}
+                label={`Internal Tool Calls (${exec.metadata.sandboxToolCalls.length})`}
+                status="complete"
+              >
+                <div className="space-y-1 mt-2 overflow-hidden max-w-full">
+                  {exec.metadata.sandboxToolCalls.map((call, idx) => (
+                    <Tool key={idx} defaultOpen={false}>
+                      <ToolHeader
+                        title={call.toolName}
+                        type="tool-invocation"
+                        state={call.error ? 'output-error' : call.result ? 'output-available' : 'input-available'}
+                      />
+                      <ToolContent className="overflow-hidden max-w-fit">
+                        <ToolInput input={call.args} className="overflow-hidden max-w-fit" />
+                        {(call.result || call.error) && (
+                          <ToolOutput output={call.result} errorText={call.error} className="overflow-hidden max-w-fit whitespace-pre-wrap" />
+                        )}
+                      </ToolContent>
+                    </Tool>
+                  ))}
+                </div>
+              </ChainOfThoughtStep>
+            )}
+
+            {/* Result Step */}
+            {exec.result && (
+              <ChainOfThoughtStep
+                icon={CheckCircle2Icon}
+                label="Result"
+                status="complete"
+              >
+                <div className="overflow-x-auto mt-2">
+                  <CodeBlock
+                    code={typeof exec.result === 'string' ? exec.result : JSON.stringify(exec.result, null, 2)}
+                    language="json"
+                    wrapText
+                  >
+                    <CodeBlockCopyButton />
+                  </CodeBlock>
+                </div>
+              </ChainOfThoughtStep>
+            )}
+
+            {/* Token Savings Step */}
+            {exec.metadata?.tokenSavingsBreakdown && (
+              <ChainOfThoughtStep
+                className="text-lg mt-4"
+                icon={SparklesIcon}
+                label={
+                  <span className="text-lg">
+                    Token Savings: <strong className="text-amber-600 dark:text-amber-400">{(exec.metadata.totalTokensSaved || 0).toLocaleString()}</strong>
+                  </span>
+                }
+                status="complete"
+              >
+                <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground mt-2 pl-1">
+                  {[
+                    { label: "Intermediate results", value: exec.metadata.tokenSavingsBreakdown.intermediateResults },
+                    { label: "Context re-sends", value: exec.metadata.tokenSavingsBreakdown.roundTripContext },
+                    { label: "Tool overhead", value: exec.metadata.tokenSavingsBreakdown.toolCallOverhead },
+                    { label: "LLM decisions", value: exec.metadata.tokenSavingsBreakdown.llmDecisions }
+                  ].map((item) => (
+                    <div key={item.label}>
+                      <b>{item.label}:</b> {item.value.toLocaleString()}
+                    </div>
+                  ))}
+                </div>
+              </ChainOfThoughtStep>
+            )}
+          </ChainOfThoughtContent>
+        </ChainOfThought>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex h-screen flex-col bg-background">
+      {/* Header */}
+      <header className="flex-none flex items-center justify-between border-b px-6 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 shadow-lg shadow-violet-500/25">
+            <ZapIcon className="h-5 w-5 text-white" />
           </div>
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Programmatic Tool Calling</h1>
+            <p className="text-xs text-muted-foreground">AI SDK with Code Execution</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Button
+            variant={showDebug ? "secondary" : "ghost"}
+            size="sm"
+            onClick={() => setShowDebug(!showDebug)}
+            className="gap-2"
+          >
+            <PanelRightIcon className="h-4 w-4" />
+            {showDebug ? 'Hide Debug' : 'Debug'}
+          </Button>
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Main Chat Area */}
-        <div className="flex flex-1 flex-col">
-          {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-4 py-6">
-            <div className="mx-auto max-w-3xl space-y-4">
-              {messages.length === 0 && (
-                <div className="text-center text-gray-500 dark:text-gray-400">
-                  <p className="text-lg font-medium">Start a conversation</p>
-                  <p className="mt-2 text-sm">
-                    Try: "Get 5 users, calculate their average score, and return users with score above 50"
-                  </p>
+        <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+          {/* Conversation with proper scroll management */}
+          <Conversation className="flex-1 min-h-0 overflow-auto">
+            {messages.length === 0 ? (
+              <ConversationEmptyState
+                title="Start a conversation"
+                description="Try one of the suggested prompts below or type your own message to see programmatic tool calling in action"
+                icon={
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-violet-500/20 to-purple-600/20">
+                    <SparklesIcon className="h-8 w-8 text-violet-500" />
+                  </div>
+                }
+              >
+                <div className="flex flex-col items-center gap-6">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-violet-500/20 to-purple-600/20">
+                    <SparklesIcon className="h-8 w-8 text-violet-500" />
+                  </div>
+                  <div className="space-y-2 text-center">
+                    <h3 className="text-xl font-semibold">Start a conversation</h3>
+                    <p className="text-muted-foreground text-sm max-w-md">
+                      Try one of the suggested prompts below or type your own message to see programmatic tool calling in action
+                    </p>
+                  </div>
+                  <Suggestions className="justify-center max-w-3xl flex flex-wrap gap-2">
+                    {SUGGESTED_PROMPTS.map((prompt) => (
+                      <Suggestion
+                        key={prompt}
+                        suggestion={prompt}
+                        onClick={handleSuggestionClick}
+                        variant="outline"
+                        className="text-sm"
+                      />
+                    ))}
+                  </Suggestions>
                 </div>
-              )}
-              {messages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
-              ))}
-              {isLoading && (
-                <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]"></div>
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]"></div>
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400"></div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          </div>
+              </ConversationEmptyState>
+            ) : (
+              <ConversationContent className="max-w-4xl mx-auto px-4 py-6">
+                {messages.map((message) => (
+                  <Message key={message.id} from={message.role as 'user' | 'assistant'}>
+                    <MessageContent>
+                      {message.role === 'assistant' ? (
+                        <>
+                          <MessageResponse>{message.content}</MessageResponse>
 
-          {/* Input Area */}
-          <div className="border-t border-gray-200 bg-white px-4 py-4 dark:border-gray-800 dark:bg-gray-950">
-            <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
-              <div className="flex gap-2">
-                <input
-                  type="text"
+                          {/* Render code execution if present */}
+                          {renderCodeExecution(message.codeExecution)}
+
+                          {/* Render tool calls if present */}
+                          {renderToolCalls(message.toolCalls)}
+                        </>
+                      ) : (
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                      )}
+                    </MessageContent>
+
+                    {/* Message Actions for assistant messages */}
+                    {message.role === 'assistant' && message.content && !isLoading && (
+                      <MessageActions className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <MessageAction
+                          tooltip={copiedMessageId === message.id ? "Copied!" : "Copy"}
+                          onClick={() => handleCopy(message.content, message.id)}
+                        >
+                          {copiedMessageId === message.id ? (
+                            <CheckIcon className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <CopyIcon className="h-4 w-4" />
+                          )}
+                        </MessageAction>
+                      </MessageActions>
+                    )}
+                  </Message>
+                ))}
+
+                {/* Loading state with pending executions */}
+                {isLoading && (
+                  <Message from="assistant">
+                    <MessageContent>
+                      <div>
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Loader size={16} />
+                          <span className="text-sm">
+                            {pendingCodeExecution ? 'Executing code in sandbox...' : 
+                             pendingToolCalls.length > 0 ? `Running ${pendingToolCalls.length} tool(s)...` : 
+                             'Thinking...'}
+                          </span>
+                        </div>
+
+                        {/* Show pending code execution */}
+                        {pendingCodeExecution && (
+                          <Card className="p-3 bg-amber-500/5 border-amber-500/20 overflow-hidden">
+                            <div className="flex items-center gap-2 mb-2">
+                              <BoxIcon className="h-4 w-4 text-amber-500 animate-pulse" />
+                              <span className="text-sm font-medium">Sandbox Execution in Progress</span>
+                            </div>
+                            <CodeBlock code={pendingCodeExecution.code} language="javascript" />
+                          </Card>
+                        )}
+
+                        {/* Show pending tool calls */}
+                        {pendingToolCalls.length > 0 && !pendingCodeExecution && (
+                          <div className="space-y-2">
+                            {pendingToolCalls.map((call) => (
+                              <Tool key={call.id}>
+                                <ToolHeader
+                                  title={call.toolName}
+                                  type="tool-invocation"
+                                  state={call.result ? 'output-available' : 'input-available'}
+                                />
+                              </Tool>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </MessageContent>
+                  </Message>
+                )}
+              </ConversationContent>
+            )}
+            <ConversationScrollButton />
+          </Conversation>
+
+          {/* Input Area - Fixed at bottom */}
+          <div className="flex-none border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6 py-4">
+            <div className="max-w-4xl mx-auto">
+              <PromptInput
+                onSubmit={handleSubmit}
+                className="shadow-lg"
+              >
+                <PromptInputTextarea
+                  placeholder="What would you like to know?"
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Type your message..."
-                  className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder-gray-400"
+                    onChange={(e) => setInput(e.target.value)}
                   disabled={isLoading}
                 />
-                {isLoading ? (
-                  <button
-                    type="button"
-                    onClick={handleStop}
-                    className="rounded-lg bg-red-500 px-6 py-2 font-medium text-white hover:bg-red-600"
-                  >
-                    Stop
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-blue-600 px-6 py-2 font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                    disabled={!input.trim()}
-                  >
-                    Send
-                  </button>
-                )}
-              </div>
-            </form>
+                <PromptInputFooter>
+                  <PromptInputTools>
+                    <ModelSelector open={modelSelectorOpen} onOpenChange={setModelSelectorOpen}>
+                      <ModelSelectorTrigger asChild>
+                        <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-muted-foreground hover:text-foreground">
+                          <ModelSelectorLogo 
+                            provider={modelConfig.model.split('/')[0] || 'vercel'} 
+                            className="h-4 w-4"
+                          />
+                          <span className="text-xs truncate max-w-[140px]">
+                            {modelConfig.model.split('/').pop() || 'Select model'}
+                          </span>
+                          <Kbd className="hidden sm:inline-flex text-[10px] h-4">⌘K</Kbd>
+                          <ChevronDownIcon className="h-3 w-3 opacity-50" />
+                        </Button>
+                      </ModelSelectorTrigger>
+                      <ModelSelectorContent title="Select a model">
+                        <ModelSelectorInput placeholder="Search models..." />
+                        <ModelSelectorList>
+                          <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
+                          
+                          {/* Group gateway models by provider */}
+                          {(() => {
+                            // Group models by provider
+                            const groupedModels = gatewayModels.reduce((acc, model) => {
+                              const provider = model.provider || 'other';
+                              if (!acc[provider]) {
+                                acc[provider] = [];
+                              }
+                              acc[provider].push(model);
+                              return acc;
+                            }, {} as Record<string, GatewayModel[]>);
+
+                            // Define provider display order (popular ones first)
+                            const providerOrder = [
+                              'anthropic', 'openai', 'google', 'mistral', 'groq', 
+                              'xai', 'deepseek', 'meta', 'perplexity', 'cohere'
+                            ];
+
+                            // Sort providers: ordered ones first, then alphabetically
+                            const sortedProviders = Object.keys(groupedModels).sort((a, b) => {
+                              const aIndex = providerOrder.indexOf(a);
+                              const bIndex = providerOrder.indexOf(b);
+                              if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex;
+                              if (aIndex !== -1) return -1;
+                              if (bIndex !== -1) return 1;
+                              return a.localeCompare(b);
+                            });
+
+                            // Format provider name for display
+                            const formatProviderName = (provider: string) => {
+                              const providerNames: Record<string, string> = {
+                                'anthropic': 'Anthropic',
+                                'openai': 'OpenAI',
+                                'google': 'Google',
+                                'mistral': 'Mistral AI',
+                                'groq': 'Groq',
+                                'xai': 'xAI',
+                                'deepseek': 'DeepSeek',
+                                'meta': 'Meta',
+                                'perplexity': 'Perplexity',
+                                'cohere': 'Cohere',
+                                'amazon-bedrock': 'Amazon Bedrock',
+                                'azure': 'Azure OpenAI',
+                                'google-vertex': 'Google Vertex AI',
+                                'fireworks-ai': 'Fireworks AI',
+                                'togetherai': 'Together AI',
+                                'cerebras': 'Cerebras',
+                                'nvidia': 'NVIDIA',
+                              };
+                              return providerNames[provider] || provider.charAt(0).toUpperCase() + provider.slice(1);
+                            };
+
+                            return sortedProviders.map((provider) => (
+                              <ModelSelectorGroup key={provider} heading={formatProviderName(provider)}>
+                                {groupedModels[provider].map((model) => (
+                                  <ModelSelectorItem 
+                                    key={model.id}
+                                    value={model.id}
+                                    onSelect={() => {
+                                      setModelConfig({ provider: 'gateway', model: model.id });
+                                      setModelSelectorOpen(false);
+                                    }}
+                                  >
+                                    <ModelSelectorLogo provider={provider} />
+                                    <ModelSelectorName>
+                                      {model.name || model.id.split('/').pop()}
+                                    </ModelSelectorName>
+                                  </ModelSelectorItem>
+                                ))}
+                              </ModelSelectorGroup>
+                            ));
+                          })()}
+                        </ModelSelectorList>
+                      </ModelSelectorContent>
+                    </ModelSelector>
+                  </PromptInputTools>
+                  {isLoading ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      onClick={handleStop}
+                      className="gap-2"
+                    >
+                      <SquareIcon className="h-4 w-4" />
+                      Stop
+                    </Button>
+                  ) : (
+                    <PromptInputSubmit
+                      disabled={!input.trim()}
+                      status={getStatus()}
+                    />
+                  )}
+                </PromptInputFooter>
+              </PromptInput>
+            </div>
           </div>
         </div>
 
@@ -271,10 +792,7 @@ export default function ChatInterface() {
       </div>
 
       {/* Efficiency Metrics Bar */}
-      {metrics && (
-        <EfficiencyMetricsDisplay metrics={metrics} />
-      )}
+      {metrics && <EfficiencyMetricsDisplay metrics={metrics} />}
     </div>
   );
 }
-

@@ -18,6 +18,7 @@ type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
   code: string;
   language: BundledLanguage;
   showLineNumbers?: boolean;
+  wrapText?: boolean;
 };
 
 type CodeBlockContextType = {
@@ -76,6 +77,7 @@ export const CodeBlock = ({
   code,
   language,
   showLineNumbers = false,
+  wrapText = false,
   className,
   children,
   ...props
@@ -98,23 +100,33 @@ export const CodeBlock = ({
     };
   }, [code, language, showLineNumbers]);
 
+  const whitespaceClass = wrapText 
+    ? "[&_code]:whitespace-pre-wrap [&_code]:break-words [&_code]:break-all" 
+    : "[&_code]:whitespace-pre";
+
   return (
     <CodeBlockContext.Provider value={{ code }}>
       <div
         className={cn(
-          "group relative w-full overflow-hidden rounded-md border bg-background text-foreground",
+          "group relative w-full max-w-full overflow-hidden rounded-md border bg-background text-foreground",
           className
         )}
         {...props}
       >
-        <div className="relative">
+        <div className="relative max-w-full overflow-hidden">
           <div
-            className="overflow-hidden dark:hidden [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&_code]:font-mono [&_code]:text-sm"
+            className={cn(
+              "overflow-x-auto max-w-full dark:hidden [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&>pre]:overflow-x-auto [&>pre]:max-w-full [&_code]:font-mono [&_code]:text-sm",
+              whitespaceClass
+            )}
             // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
             dangerouslySetInnerHTML={{ __html: html }}
           />
           <div
-            className="hidden overflow-hidden dark:block [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&_code]:font-mono [&_code]:text-sm"
+            className={cn(
+              "hidden overflow-x-auto max-w-full dark:block [&>pre]:m-0 [&>pre]:bg-background! [&>pre]:p-4 [&>pre]:text-foreground! [&>pre]:text-sm [&>pre]:overflow-x-auto [&>pre]:max-w-full [&_code]:font-mono [&_code]:text-sm",
+              whitespaceClass
+            )}
             // biome-ignore lint/security/noDangerouslySetInnerHtml: "this is needed."
             dangerouslySetInnerHTML={{ __html: darkHtml }}
           />

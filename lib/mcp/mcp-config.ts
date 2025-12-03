@@ -46,7 +46,14 @@ export const mcpServers: MCPServerConfig[] = [
     type: "http",
     url: "https://mcp.firecrawl.dev/fc-6018b8c2fce04db6930f1e20fb570945/v2/mcp"
   },
-  
+  {
+    name: "CLI",
+    type: "stdio",
+    "command": "npx",
+    "args": [
+      "mcp-server-commands"
+    ]
+  }
   // Example: Azure MCP Server (uncomment to enable)
   // {
   //   name: "Azure MCP",

@@ -63,13 +63,14 @@ export async function POST(req: Request) {
     }
 
     // Wrap tools with programmatic calling
-    const { tools: enhancedTools } = withProgrammaticCalling(allTools);
+    const { tools: enhancedTools, wrapper } = withProgrammaticCalling(allTools);
     const contextManager = new ContextManager();
     const toolCalls: any[] = [];
     const codeExecutions: any[] = [];
 
     // Get the model instance
     const model = getModel(modelConfig as ModelConfig);
+    console.log(`[Chat API] Using model: ${modelConfig.provider}/${modelConfig.model}`);
 
     // Build tool list for system prompt
     const toolNames = Object.keys(enhancedTools).filter(name => name !== 'code_execution');
@@ -81,38 +82,85 @@ export async function POST(req: Request) {
       toolDescription += `\n\nAdditionally, you have access to ${mcpTools.length} MCP (Model Context Protocol) tools: ${mcpTools.slice(0, 5).join(', ')}${mcpTools.length > 5 ? ` and ${mcpTools.length - 5} more` : ''}.`;
       toolDescription += `\nMCP tools are prefixed with 'mcp_' and provide access to external services and data sources.`;
     }
+    
+    // Generate detailed tool documentation for code_execution
+    const toolDocumentation = wrapper.generateToolDocumentation();
 
     // Prepare messages with system prompt
     const systemMessage = {
       role: 'system' as const,
       content: `${toolDescription}
 
-When you need to process multiple items (like getting multiple users), ALWAYS use the code_execution tool to write JavaScript code that:
+When you need to process multiple items or make multiple tool calls, ALWAYS use the code_execution tool to write JavaScript code that:
 1. Calls tools in parallel using Promise.all() when possible
-2. Processes the results efficiently
+2. Processes the results efficiently  
 3. Returns only the final aggregated result
 
-For example, to get 10 users and find top 3 by score, use code_execution with:
+IMPORTANT: Both local tools AND MCP tools can be used within code_execution!
+This enables efficient parallel execution of multiple MCP tool calls.
+
+**TOOL PARAMETER REFERENCE:**
+${toolDocumentation}
+
+**DEFENSIVE HELPER FUNCTIONS (always available in code_execution):**
+- toArray(value) - Converts any value to array safely
+- safeGet(obj, 'path.to.prop', default) - Safe nested property access
+- safeMap(value, fn) - Maps over any value safely
+- safeFilter(value, fn) - Filters any value safely
+- first(value) - Gets first item safely
+- len(value) - Gets length safely
+- isSuccess(response) - Checks if MCP response succeeded
+- extractData(response) - Extracts data from MCP response
+- extractText(response, default) - Extracts text/string output
+- getCommandOutput(response) - Returns { success, output, error }
+
+Example with local tools:
 \`\`\`javascript
 const users = await Promise.all([
   getUser({ id: 'user1' }),
   getUser({ id: 'user2' }),
-  getUser({ id: 'user3' }),
-  getUser({ id: 'user4' }),
-  getUser({ id: 'user5' }),
-  getUser({ id: 'user6' }),
-  getUser({ id: 'user7' }),
-  getUser({ id: 'user8' }),
-  getUser({ id: 'user9' }),
-  getUser({ id: 'user10' })
+  getUser({ id: 'user3' })
 ]);
 const sorted = users.sort((a, b) => b.score - a.score);
 return sorted.slice(0, 3);
 \`\`\`
 
-Always use code_execution for tasks requiring 3+ tool calls.
+Example with MCP scraping (use defensive patterns):
+\`\`\`javascript
+const results = await Promise.all([
+  mcp_firecrawl_scrape({ url: 'https://example1.com' }),
+  mcp_firecrawl_scrape({ url: 'https://example2.com' })
+]);
+return safeMap(results, r => ({
+  success: isSuccess(r),
+  title: safeGet(r, 'metadata.title', 'Unknown'),
+  preview: safeGet(r, 'markdown', '').substring(0, 200)
+}));
+\`\`\`
 
-Note: MCP tools (prefixed with 'mcp_') cannot be used within code_execution - call them directly as they require external connections.`,
+Example with MCP command execution:
+\`\`\`javascript
+const commands = ['pwd', 'whoami', 'date'];
+const results = await Promise.all(
+  commands.map(cmd => mcp_run_command({ command: cmd }))
+);
+// extractText gets the output from any response format:
+return results.map((r, i) => ({
+  command: commands[i],
+  output: extractText(r, 'No output'),
+  success: isSuccess(r)
+}));
+\`\`\`
+
+**CRITICAL RULES FOR MCP TOOLS:**
+1. Pass parameters as SINGLE OBJECT: mcp_tool({ param: value })
+2. ALWAYS use defensive helpers - MCP responses vary by server
+3. Check isSuccess(response) before using data
+4. Use safeGet() for ALL nested properties
+5. Use toArray() or safeMap() when iterating results
+6. NEVER assume response structure - different MCP servers return different formats
+
+Always use code_execution for tasks requiring 3+ tool calls - this saves significant tokens by executing all tools in a single sandbox run rather than multiple LLM round-trips.`,
     };
 
     // Stream the response
@@ -127,10 +175,17 @@ Note: MCP tools (prefixed with 'mcp_') cannot be used within code_execution - ca
           // Track tool calls
           if (step.toolCalls) {
             for (const toolCall of step.toolCalls) {
+              // Find corresponding result
+              const toolResult = step.toolResults?.find(
+                (r: any) => r.toolCallId === toolCall.toolCallId
+              );
+              const resultOutput = toolResult?.output || toolResult?.result;
+              
               toolCalls.push({
                 id: toolCall.toolCallId,
                 toolName: toolCall.toolName,
-                args: toolCall.args,
+                args: toolCall.args || toolCall.input,
+                result: resultOutput,
                 timestamp: new Date(),
               });
 
