@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/rsanzzzzz-programmatic-tool-calling-ai-sdk-badge.png)](https://mseep.ai/app/rsanzzzzz-programmatic-tool-calling-ai-sdk)
+
 # ⚡ programmatic-tool-calling-ai-sdk - Cut AI Costs with Ease
 
 ## 🚀 Getting Started
