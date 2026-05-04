@@ -1,5 +1,7 @@
 # ⚡ programmatic-tool-calling-ai-sdk - Cut AI Costs with Ease
 
+[![SafeSkill 85/100](https://img.shields.io/badge/SafeSkill-85%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/rsanzzzzz-programmatic-tool-calling-ai-sdk)
+
 ## 🚀 Getting Started
 
 Welcome to the programmatic-tool-calling-ai-sdk! This tool allows you to significantly reduce LLM inference costs by up to 80%. It generates JavaScript code to efficiently manage tools within the Vercel Sandbox. With support for popular models via AI Gateway, this tool is designed for ease of use.
